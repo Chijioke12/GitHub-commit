@@ -1,0 +1,6 @@
+{
+  "name": "Zip to GitHub",
+  "description": "Unpack and commit zipped repositories directly to GitHub",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
