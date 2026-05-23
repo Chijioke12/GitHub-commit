@@ -1,13 +1,57 @@
 import JSZip from 'jszip';
-import { GitHubConfig } from './types';
+import { GitHubConfig, GitHubRepo } from './types';
+
+export async function fetchRepositories(pat: string): Promise<GitHubRepo[]> {
+  try {
+    const res = await fetch(`https://api.github.com/user/repos?per_page=100&sort=updated`, {
+      headers: {
+        'Authorization': `Bearer ${pat}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch repositories`);
+    }
+    return res.json();
+  } catch (error: any) {
+    throw new Error(error.message || 'Error fetching repositories');
+  }
+}
+
+export async function createRepository(pat: string, name: string, isPrivate: boolean): Promise<GitHubRepo> {
+  try {
+    const res = await fetch(`https://api.github.com/user/repos`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${pat}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ name, private: isPrivate, auto_init: true })
+    });
+    
+    if (!res.ok) {
+      let message = res.statusText;
+      try {
+        const err = await res.json();
+        message = err.message || message;
+      } catch (e) {}
+      throw new Error(`Failed to create repository: ${message}`);
+    }
+    return res.json();
+  } catch (error: any) {
+    throw new Error(error.message || 'Error creating repository');
+  }
+}
 
 export async function commitZipToGitHub(
   config: GitHubConfig,
+  repoFullName: string,
   zipFile: File,
   commitMessage: string,
   onProgress: (msg: string) => void
 ) {
-  const { pat, owner, repo, branch } = config;
+  const { pat, branch } = config;
   const headers = {
     'Authorization': `Bearer ${pat}`,
     'Accept': 'application/vnd.github.v3+json',
@@ -15,7 +59,7 @@ export async function commitZipToGitHub(
   };
 
   const api = async (path: string, options: RequestInit = {}) => {
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+    const res = await fetch(`https://api.github.com/repos/${repoFullName}${path}`, {
       ...options,
       headers: { ...headers, ...options.headers }
     });
@@ -73,69 +117,6 @@ export async function commitZipToGitHub(
           finalPath = finalPath.slice(commonRoot.length);
         }
         files.push({ path: finalPath, content });
-      }
-    }
-
-    if (config.injectViteWorkflow) {
-      const workflowContent = `name: Deploy to GitHub Pages
-
-on:
-  push:
-    branches: [ "${branch}" ]
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install dependencies
-        run: npm ci || npm install
-      - name: Build
-        run: npm run build -- --base=/\${{ github.event.repository.name }}/
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-        with:
-          enablement: true
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './dist'
-
-  deploy:
-    environment:
-      name: github-pages
-      url: \${{ steps.deployment.outputs.page_url }}
-    needs: build
-    runs-on: ubuntu-latest
-    name: Deploy
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-`;
-      const b64 = btoa(unescape(encodeURIComponent(workflowContent)));
-      const existingIdx = files.findIndex(f => f.path === '.github/workflows/deploy.yml');
-      if (existingIdx !== -1) {
-        files[existingIdx].content = b64;
-      } else {
-        files.push({
-          path: '.github/workflows/deploy.yml',
-          content: b64
-        });
       }
     }
 

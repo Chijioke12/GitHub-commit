@@ -1,16 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UploadCloud, FileArchive, Settings, CheckCircle2, Loader2, AlertCircle, Github } from 'lucide-react';
-import { GitHubConfig } from './types';
-import { commitZipToGitHub } from './github';
+import { UploadCloud, FileArchive, Settings, CheckCircle2, Loader2, AlertCircle, Github, Plus, Search, GitBranch } from 'lucide-react';
+import { GitHubConfig, GitHubRepo } from './types';
+import { commitZipToGitHub, fetchRepositories, createRepository } from './github';
 
 export default function App() {
   const [config, setConfig] = useState<GitHubConfig>({
     pat: '',
-    owner: '',
-    repo: '',
     branch: 'main'
   });
   
+  const [repositories, setRepositories] = useState<GitHubRepo[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  const [isCreatingRepo, setIsCreatingRepo] = useState(false);
+  const [newRepoName, setNewRepoName] = useState('');
+  const [newRepoPrivate, setNewRepoPrivate] = useState(false);
+  const [createRepoLoading, setCreateRepoLoading] = useState(false);
+
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [commitMessage, setCommitMessage] = useState('Update via Zip upload');
   
@@ -25,7 +34,11 @@ export default function App() {
     const saved = localStorage.getItem('github-zip-config');
     if (saved) {
       try {
-        setConfig((prev) => ({ ...prev, ...JSON.parse(saved) }));
+        const parsed = JSON.parse(saved);
+        setConfig({ pat: parsed.pat || '', branch: parsed.branch || 'main' });
+        if (parsed.pat) {
+          loadRepositories(parsed.pat);
+        }
       } catch (e) {
         // ignore
       }
@@ -36,8 +49,48 @@ export default function App() {
     localStorage.setItem('github-zip-config', JSON.stringify(config));
   }, [config]);
 
+  const loadRepositories = async (pat: string) => {
+    if (!pat) return;
+    setIsLoadingRepos(true);
+    try {
+      const repos = await fetchRepositories(pat);
+      setRepositories(repos);
+      if (repos.length > 0 && !selectedRepo) {
+        setSelectedRepo(repos[0].full_name);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || 'Failed to fetch repositories.');
+    } finally {
+      setIsLoadingRepos(false);
+    }
+  };
+
   const handleConfigChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setConfig(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const newConfig = { ...config, [e.target.name]: e.target.value };
+    setConfig(newConfig);
+  };
+
+  const handlePatBlur = () => {
+    loadRepositories(config.pat);
+  };
+
+  const handleCreateRepository = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!config.pat || !newRepoName) return;
+    setCreateRepoLoading(true);
+    try {
+      const newRepo = await createRepository(config.pat, newRepoName, newRepoPrivate);
+      setRepositories([newRepo, ...repositories]);
+      setSelectedRepo(newRepo.full_name);
+      setIsCreatingRepo(false);
+      setNewRepoName('');
+      setNewRepoPrivate(false);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to create repository.');
+    } finally {
+      setCreateRepoLoading(false);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -71,8 +124,8 @@ export default function App() {
       return;
     }
     
-    if (!config.pat || !config.owner || !config.repo || !config.branch) {
-      setErrorMsg('Please fill out all repository configuration fields.');
+    if (!config.pat || !selectedRepo || !config.branch) {
+      setErrorMsg('Please properly configure Pat, select a Repository, and branch.');
       setStatus('error');
       return;
     }
@@ -82,7 +135,7 @@ export default function App() {
     setProgressMsg('Looking into zip file...');
 
     try {
-      await commitZipToGitHub(config, zipFile, commitMessage, (msg) => {
+      await commitZipToGitHub(config, selectedRepo, zipFile, commitMessage, (msg) => {
         setProgressMsg(msg);
       });
       setStatus('success');
@@ -93,6 +146,8 @@ export default function App() {
       setStatus('error');
     }
   };
+
+  const filteredRepos = repositories.filter(r => r.full_name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-neutral-200 font-sans p-4 sm:p-6 lg:p-8 flex justify-center">
@@ -124,65 +179,110 @@ export default function App() {
                   name="pat"
                   value={config.pat}
                   onChange={handleConfigChange}
+                  onBlur={handlePatBlur}
                   placeholder="ghp_xxxxxxxxxxxxxxxxxxx"
                   className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
                 />
                 <p className="text-[10px] text-neutral-600 mt-1.5 ml-0.5">Needs "repo" scope to commit to repositories.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-neutral-500 mb-1.5 ml-0.5">Owner / Org</label>
-                  <input
-                    type="text"
-                    name="owner"
-                    value={config.owner}
-                    onChange={handleConfigChange}
-                    placeholder="e.g. torvalds"
-                    className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
-                  />
+              {!isCreatingRepo ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-medium text-neutral-500 ml-0.5">Select Repository</label>
+                    <button 
+                      type="button" 
+                      onClick={() => setIsCreatingRepo(true)}
+                      className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                    >
+                      <Plus className="w-3 h-3" /> New Repo
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        {isLoadingRepos ? <Loader2 className="w-4 h-4 text-neutral-500 animate-spin" /> : <Search className="w-4 h-4 text-neutral-500" />}
+                      </div>
+                      <input
+                        type="text"
+                        className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
+                        placeholder="Search repositories..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <select
+                      className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all cursor-pointer appearance-none"
+                      value={selectedRepo}
+                      onChange={(e) => setSelectedRepo(e.target.value)}
+                    >
+                      <option value="" disabled>Select a repository...</option>
+                      {filteredRepos.map(repo => (
+                        <option key={repo.id} value={repo.full_name}>
+                          {repo.full_name} {repo.private ? '(Private)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-neutral-500 mb-1.5 ml-0.5">Repository</label>
-                  <input
-                    type="text"
-                    name="repo"
-                    value={config.repo}
-                    onChange={handleConfigChange}
-                    placeholder="e.g. linux"
-                    className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
-                  />
+              ) : (
+                <div className="space-y-3 bg-[#1a1a1a] p-4 rounded-xl border border-neutral-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-medium text-white">Create New Repository</h3>
+                    <button 
+                      type="button" 
+                      onClick={() => setIsCreatingRepo(false)}
+                      className="text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-neutral-500 mb-1 ml-0.5">Repository Name</label>
+                    <input
+                      type="text"
+                      value={newRepoName}
+                      onChange={(e) => setNewRepoName(e.target.value)}
+                      placeholder="my-awesome-project"
+                      className="w-full bg-[#121212] border border-neutral-700/50 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600 mb-3"
+                    />
+                  </div>
+                  <label className="flex items-center space-x-2 cursor-pointer mb-4">
+                    <input
+                      type="checkbox"
+                      checked={newRepoPrivate}
+                      onChange={(e) => setNewRepoPrivate(e.target.value === 'true' || e.target.checked)}
+                      className="w-3.5 h-3.5 rounded border-neutral-700 bg-[#121212] text-blue-500 focus:ring-blue-500/50 focus:ring-offset-0 transition-all cursor-pointer"
+                    />
+                    <span className="text-xs font-medium text-neutral-300">Private repository</span>
+                  </label>
+                  
+                  <button
+                    type="button"
+                    onClick={handleCreateRepository}
+                    disabled={createRepoLoading || !newRepoName}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {createRepoLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    <span>Create Repository</span>
+                  </button>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-neutral-500 mb-1.5 ml-0.5">Branch</label>
-                <input
-                  type="text"
-                  name="branch"
-                  value={config.branch}
-                  onChange={handleConfigChange}
-                  placeholder="main"
-                  className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-neutral-800/60 mt-4">
-                <label className="flex items-start space-x-3 cursor-pointer group">
-                  <div className="flex items-center h-5">
-                    <input
-                      type="checkbox"
-                      name="injectViteWorkflow"
-                      checked={!!config.injectViteWorkflow}
-                      onChange={(e) => setConfig(prev => ({ ...prev, injectViteWorkflow: e.target.checked }))}
-                      className="w-4 h-4 rounded border-neutral-700 bg-[#1a1a1a] text-blue-500 focus:ring-blue-500/50 focus:ring-offset-0 transition-all cursor-pointer"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-neutral-300 group-hover:text-white transition-colors">Setup GitHub Pages (Vite Workflow)</span>
-                    <span className="text-[11px] text-neutral-500 leading-tight mt-1">Automatically injects a GitHub Actions workflow to build and host your Vite app from the 'dist' folder when you push. <b>Remember to set <code>base: '/{config.repo || 'repo-name'}/'</code> in your vite.config.ts!</b></span>
-                  </div>
-                </label>
+                <div className="relative">
+                  <GitBranch className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    name="branch"
+                    value={config.branch}
+                    onChange={handleConfigChange}
+                    placeholder="main"
+                    className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl pl-9 pr-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
+                  />
+                </div>
               </div>
             </div>
           </section>
