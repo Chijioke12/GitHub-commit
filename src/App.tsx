@@ -166,6 +166,24 @@ export default function App() {
                   className="w-full bg-[#1a1a1a] border border-neutral-800 rounded-xl px-3.5 py-2.5 text-sm text-neutral-200 outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder:text-neutral-600"
                 />
               </div>
+
+              <div className="pt-3 border-t border-neutral-800/60 mt-4">
+                <label className="flex items-start space-x-3 cursor-pointer group">
+                  <div className="flex items-center h-5">
+                    <input
+                      type="checkbox"
+                      name="injectViteWorkflow"
+                      checked={!!config.injectViteWorkflow}
+                      onChange={(e) => setConfig(prev => ({ ...prev, injectViteWorkflow: e.target.checked }))}
+                      className="w-4 h-4 rounded border-neutral-700 bg-[#1a1a1a] text-blue-500 focus:ring-blue-500/50 focus:ring-offset-0 transition-all cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-neutral-300 group-hover:text-white transition-colors">Setup GitHub Pages (Vite Workflow)</span>
+                    <span className="text-[11px] text-neutral-500 leading-tight mt-1">Automatically injects a GitHub Actions workflow to build and host your Vite app from the 'dist' folder when you push. <b>Remember to set <code>base: '/{config.repo || 'repo-name'}/'</code> in your vite.config.ts!</b></span>
+                  </div>
+                </label>
+              </div>
             </div>
           </section>
 

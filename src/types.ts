@@ -3,4 +3,5 @@ export interface GitHubConfig {
   owner: string;
   repo: string;
   branch: string;
+  injectViteWorkflow?: boolean;
 }

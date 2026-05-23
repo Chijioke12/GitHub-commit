@@ -82,6 +82,67 @@ export async function commitZipToGitHub(
       }
     }
 
+    if (config.injectViteWorkflow) {
+      const workflowContent = `name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ "${branch}" ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci || npm install
+      - name: Build
+        run: npm run build
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+`;
+      const b64 = btoa(unescape(encodeURIComponent(workflowContent)));
+      const existingIdx = files.findIndex(f => f.path === '.github/workflows/deploy.yml');
+      if (existingIdx !== -1) {
+        files[existingIdx].content = b64;
+      } else {
+        files.push({
+          path: '.github/workflows/deploy.yml',
+          content: b64
+        });
+      }
+    }
+
     if (files.length === 0) {
       throw new Error('No valid files found in the zip archive.');
     }
