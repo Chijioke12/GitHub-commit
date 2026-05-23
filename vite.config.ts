@@ -21,7 +21,13 @@ export default defineConfig(() => {
           theme_color: '#0a0a0a',
           background_color: '#0a0a0a',
           display: 'standalone',
+          start_url: '.',
           icons: [
+            {
+              src: 'icon.svg',
+              type: 'image/svg+xml',
+              sizes: 'any'
+            },
             {
               src: 'pwa-192x192.png',
               sizes: '192x192',
